@@ -1,0 +1,311 @@
+#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+# Python2.x 导入方法
+# from Tkinter import *  # 导入 Tkinter 库
+
+# Python3.x 导入方法
+from tkinter import *
+from tkinter import ttk
+import tkinter as tk
+import paddlex as pdx
+import cv2
+from PIL import Image, ImageTk#图像控件
+import os.path
+import threading
+import time
+import tkinter.messagebox
+import logging
+import speech
+from multiprocessing import Queue
+import queue
+
+message = Queue()
+
+
+
+logging.basicConfig(level=logging.DEBUG)
+
+
+print("Loading model...")
+# model = pdx.load_model('../inference_model/inference_model/')
+model =pdx.load_model('P0002-T0002_export_model/inference_model/inference_model')
+zoom=1.664
+is_vc = 0
+is_photo = 0
+is_predict = 0
+is_continue = 0 #0
+continue_time = 5
+continue_val = 2
+continue_speed = 0
+blvar=0.9
+text = '检测结果'
+textvc = ''
+timer=None
+speechtimer=None
+
+# 实例化object，建立窗口window
+window = tk.Tk()  # 创建窗口对象的背景色
+window.resizable(False, False)
+# 给窗口的可视化起名字
+window.title('智能无人海产分拣')
+
+# 设定窗口的大小(长 * 宽)
+window.geometry('1920x990')
+
+# 创建一个菜单项，类似于导航栏
+menubar = Menu(window)
+
+# 创建菜单项
+fmenu1 = Menu(window)
+for item in ['新建', '打开', '保存', '另存为']:
+    # 如果该菜单时顶层菜单的一个菜单项，则它添加的是下拉菜单的菜单项。
+    fmenu1.add_command(label=item)
+
+fmenu2 = Menu(window)
+for item in ['精度', '间隔', '分辨率']:
+    fmenu2.add_command(label=item)
+
+fmenu3 = Menu(window)
+for item in ['默认参数', '超级参数']:
+    fmenu3.add_command(label=item)
+
+fmenu4 = Menu(window)
+for item in ["版权信息", "其他说明"]:
+    fmenu4.add_command(label=item)
+
+menubar.add_cascade(label="文件", menu=fmenu1)
+menubar.add_cascade(label="选项", menu=fmenu2)
+menubar.add_cascade(label="参数", menu=fmenu3)
+menubar.add_cascade(label="视觉设备")
+menubar.add_cascade(label="传感器")
+menubar.add_cascade(label="自动控制")
+menubar.add_cascade(label="关于", menu=fmenu4)
+
+window['menu']=menubar
+
+# 画布
+canvas = tk.Canvas(window, bg='#fff', height=990, width=1920)
+bg_file = tk.PhotoImage(file='tiaojian/bg_yuyin.png')
+bg = canvas.create_image(0, 0, anchor='nw',image=bg_file)
+
+cap = cv2.VideoCapture(0)
+
+# 摄像头
+def tkImage():
+    global is_photo
+    if is_photo == 1:
+        ref, frame = cap.read()
+        cv2.imwrite('images/test.png', frame)
+        resframe = cv2.resize(frame, None, fx=zoom, fy=zoom, interpolation=cv2.INTER_CUBIC)
+        cv2.imwrite('images/test2.png', resframe)
+        is_photo = 0
+
+
+    ref,frame=cap.read()
+
+    cvimage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
+    pilImage=Image.fromarray(cvimage)
+    pilImage = pilImage.resize((454, 343),Image.ANTIALIAS)
+    tkImage =  ImageTk.PhotoImage(image=pilImage)
+    return tkImage
+
+
+canvas.pack()
+
+def sp_timer():
+    global speechtimer
+    speech.say("我知道你很急，但你先别急，我正在检测")
+    speechtimer = threading.Timer(5, sp_timer)
+    speechtimer.start()
+
+def fun_timer():
+    # print('hello timer')
+    global timer
+    global is_photo
+    global is_predict
+    global continue_speed
+    #重复构造定时器
+    is_photo = 1
+    is_predict = 1
+    timer = threading.Timer(continue_speed,fun_timer)
+    timer.start()
+
+def helloCallBack():
+    global is_photo
+    global is_predict
+    global is_continue
+    global continue_val
+    global continue_speed
+    print(continue_val)
+    if continue_val == 2:
+        global timer
+        global speechtimer
+        timer = threading.Timer(continue_speed, fun_timer)
+        timer.start()
+        speechtimer=threading.Timer(5, sp_timer)
+        speechtimer.start()
+    is_photo = 1
+    is_predict = 1
+
+# 开始识别按钮
+bt_photo = tk.PhotoImage(file = 'tiaojian/newstart.png')
+Button = tk.Button(window,command=helloCallBack,borderwidth=0, image = bt_photo)
+Button.pack()
+canvas.create_window(60, 310, width=173, height=65, anchor = 'nw', window=Button)
+
+# 取消
+def cancel_timer():
+    global is_vc
+    global timer
+    global speechtimer
+    global textvc
+
+    if timer is not None:
+        timer.cancel()
+    if speechtimer is not None:
+        speechtimer.cancel()
+    is_vc = 0
+    textvc = "点击麦克风，启动语音助手模式。"
+
+bt_cancel = tk.PhotoImage(file = 'tiaojian/newend.png')
+Cancel = tk.Button(window, command=cancel_timer,borderwidth=0, image = bt_cancel)
+Cancel.pack()
+canvas.create_window(60, 420, width=173, height=65, anchor='nw', window=Cancel)
+
+
+textvc="点击麦克风，启动语音助手模式。"
+
+def listen():
+    global is_vc
+    global textvc
+    while True:
+        speech.say("指挥官，请指派命令？")
+        logging.info('请说命令...')
+        textvc="指挥官，请指派命令。"
+        test = speech.input()
+        logging.info('识别中...')
+        speech.say("收到！")
+        textvc = "收到！"
+
+        print(test)
+        if test:
+            if "检测" in test:
+                speech.say("程序启动中，语音助手不支持唤醒。")
+                textvc = "程序启动中，语音助手不支持唤醒。"
+                is_vc=0
+                helloCallBack()
+                return
+            else:
+                speech.say("请在说一遍，我没有听清。")
+                textvc = "请在说一遍，我没有听清。"
+        else:
+            speech.say("请在说一遍，我没有听清。")
+            textvc = "请在说一遍，我没有听清。"
+        logging.info('end')
+
+# 语音
+def yuyin():
+    global is_vc
+    is_vc=1
+    t = threading.Thread(target=listen)
+    t.setDaemon(True)
+    t.start()
+
+vc_photo = tk.PhotoImage(file = 'images_qiezhi/vc1.png')
+Button_vc = tk.Button(window, command=yuyin,bg='#22517b', fg="#ffffff", borderwidth=0,image = vc_photo,relief = FLAT)
+Button_vc.pack()
+byy = canvas.create_window(60, 145, width=167, height=83, anchor = 'nw', window=Button_vc)
+
+
+vc_file = tk.PhotoImage(file='images_qiezhi/vc2.png')
+vc = canvas.create_image(60, 145, anchor='nw',image=vc_file)
+canvas.itemconfig(vc, state='hidden')
+
+# 识别结果列表
+Text = tk.Text(window, width=710, height=300,borderwidth=2)
+Text.pack()
+Text.config(state=DISABLED)
+canvas.create_window(43, 655, width=710, height=280, anchor = 'nw', window=Text)
+
+# 进度条
+pb = ttk.Progressbar(window, length=40, value=0,maximum='10', mode="indeterminate")
+pb.pack(pady=1)
+canvas.create_window(43, 934, width=709, height=20, anchor = 'nw', window=pb)
+def start():
+    pb.start()
+def stop():
+    pb.stop()
+
+start()
+while True:
+    pic = tkImage()
+    text_vc = tk.Label(window, text=textvc)
+    text_vc.pack()
+    canvas.create_window(60, 550, width="675", height="20", anchor='nw', window=text_vc)
+
+    if is_vc==1:
+        canvas.itemconfig(vc, state='normal')
+        canvas.itemconfig(byy, state='hidden')
+    else:
+        canvas.itemconfig(vc, state='hidden')
+        canvas.itemconfig(byy, state='normal')
+    if os.path.isfile('images/test.png') & is_predict == 1:
+
+
+        person_file = tk.PhotoImage(file='images/test2.png')
+        person = canvas.create_image(809, 152, anchor='nw', image=person_file)
+        canvas.create_image(809, 152, anchor='nw', image=person_file)
+
+        im = cv2.imread('images/test.png')
+        im = im.astype('float32')
+
+        result = model.predict(im)
+        # print(result)
+        pdx.det.visualize(im, result, threshold=0.9,save_dir='./images/' )
+        text = ''
+        text += '---' + time.strftime("%Y-%m-%d %X", time.localtime()) + '---\n'
+        for i in result:
+            print(i, end=',')
+            if i['score'] > float(blvar):
+                text += i['category'] + ' ' + str(i['score']) + ' ' + str(i['bbox'][0]) + ' ' + str(
+                    i['bbox'][1]) + ' ' + str(i['bbox'][2]) + ' ' + str(i['bbox'][3]) + '\n\r'
+                if i['category'] == 'baoyu':
+                    outline = 'blue'
+                elif i['category'] == 'chenzi':
+                    outline = 'green'
+                elif i['category'] == 'haidai':
+                    outline = 'black'
+                elif i['category'] == 'huage':
+                    outline = 'white'
+                elif i['category'] == 'xia':
+                    outline = 'purple'
+                elif i['category'] == 'xiaolongxia':
+                    outline = 'orange'
+                canvas.create_rectangle(
+                    809+i['bbox'][0]*zoom, 152+i['bbox'][1]*zoom,
+                    809+i['bbox'][0]*zoom+i['bbox'][2]*zoom, 152+i['bbox'][1]*zoom+i['bbox'][3]*zoom,
+                    outline=outline,
+                    width=2
+                )
+
+
+
+        Text.config(state=NORMAL)
+        Text.insert(tk.END, text)
+        Text.see(tk.END)
+        Text.config(state=DISABLED)
+
+        window.update()
+        is_predict = 0
+    canvas.create_image(306, 152, anchor='nw', image=pic)
+    window.update()
+    # window.after(10)
+
+
+cap.release()
+# 进入消息循环
+window.mainloop()
+
+
+
